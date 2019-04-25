@@ -1,0 +1,480 @@
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <fcntl.h>           /* For O_* constants */
+#include <sys/stat.h>        /* For mode constants */
+#include <unistd.h>
+#include <semaphore.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
+ #include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
+ #include <sys/shm.h>
+
+const char *SEM_PTERMINATE = "/SEM_PTERMINATE"; 
+const char *SEM_DRAGONEATING ="/SEM_DRAGONEATING"; 
+const char *SEM_DRAGONFIGHTING ="/SEM_DRAGONFIGHTING"; 
+const char *SEM_DRAGONSLEEPING ="/SEM_DRAGONSLEEPING";
+const char *SEM_THIEVESWAITING ="/SEM_THIEVESWAITING"; 
+const char *SEM_PTHIEVESWAITING ="/SEM_PTHIEVESWAITING";
+const char *SEM_THIEVESPLAYED ="/SEM_THIEVESPLAYED"; 
+const char *SEM_THIEFPLAYING ="/SEM_THIEFPLAYING"; 
+const char *SEM_HUNTERSWAITING ="/SEM_HUNTERSWAITING";
+const char *SEM_PHUNTERSWAITING ="/SEM_PHUNTERSWAITING";
+const char *SEM_HUNTERSFOUGHT = "/SEM_HUNTERSFOUGHT"; 
+const char *SEM_HUNTERFIGHTING = "/SEM_HUNTERFIGHTING";
+const char *SEM_GAMEDONE ="/SEM_GAMEDONE"; 
+const char *SEM_DRAGONPLAYING ="/SEM_DRAGONPLAYING"; 
+
+sem_t *S_PTERMINATE; 
+sem_t *S_DRAGONEATING;
+sem_t *S_DRAGONFIGHTING; 
+sem_t *S_DRAGONSLEEPING;
+sem_t *S_THIEVESWAITING; 
+sem_t *S_PTHIEVESWAITING; 
+sem_t *S_THIEVESPLAYED; 
+sem_t *S_THIEFPLAYING;
+sem_t *S_HUNTERSWAITING; 
+sem_t *S_PHUNTERSWAITING; 
+sem_t *S_HUNTERSFOUGHT; 
+sem_t *S_HUNTERFIGHTING; 
+sem_t *S_GAMEDONE;
+sem_t *S_DRAGONPLAYING;
+
+#define MAX_THIEVES_DEFEATED 3
+#define MAX_HUNTERS_DEFEATED 4
+#define MAX_TREASURE_IN_HOARD 80
+#define MIN_TREASURE_IN_HOARD 0
+
+
+union semun
+{
+	int val;
+	struct semid_ds *buf;
+	ushort *array;
+} seminfo;
+
+struct timeval startTime;
+
+int *terminateFlagp = NULL;
+int terminateFlag = 0;
+
+
+int *thievesWaitingCounterp=NULL;
+int thievesWaitingCounter=0;
+int thievesPlayedCounterp=NULL;
+int thievesPlayedCounter=0;
+
+int *huntersWaitingCounterp=NULL;
+int huntersWaitingCounter=0;
+int *huntersFoughtCounterp=NULL;
+int huntersFoughtCounter=0;
+
+
+double timeChange( struct timeval starttime );
+void initSem();
+void smaug(float winProb);
+void thief(int startTimeN); 
+void hunter(int startTimeN);
+void terminate();
+void relSemMem();
+
+int semID;
+
+
+int main( )
+{
+
+	int parentPID = 0;
+	int smaugPID = 0;
+	int thiefPID = 0; 
+	int hunterPID = 0; 
+
+	int thiefCreated = 0; 
+	int hunterCreated = 0; 
+
+	double minwait = 0;
+	int newSeed = 0;
+	int sleepingTime = 0;
+	int maxThiefIntervalUsec = 0; 
+	int maxHunterIntervalUsec = 0; 
+
+	int nextInterval = 0.0;
+	int status;
+	int w = 0;
+
+	double maxThiefInterval = 0.0; 
+	double totalThiefInterval = 0.0; 
+	double maxHunterInterval = 0.0; 
+	double totalHunterInterval = 0.0; 
+
+	float winProb = 0.0;
+	double elapsedTime;
+
+	initSem();
+
+	*thievesWaitingCounterp = 0;
+	*huntersWaitingCounterp = 0;
+
+	printf("Eter a random seed to start the simulation\n");
+	scanf("%d",&newSeed);
+	srand(newSeed);
+
+	
+	printf("Enter the maximum interval length for thief");
+	scanf("%lf", &maxThiefInterval);
+	maxThiefIntervalUsec = (int)maxThiefInterval * 1000;
+	printf("max Thief interval time %f \n", maxThiefInterval);
+
+	
+	printf("Enter the maximum interval length for hunter");
+	scanf("%lf", &maxHunterInterval);
+	maxHunterIntervalUsec = (int)maxHunterInterval * 1000;
+	printf("max Hunter interval time %f \n", maxHunterInterval);
+
+	
+	printf("Enter the probability that a thief or hunter will win");
+	scanf("%f", &winProb);
+	printf("winProb is %f \n", winProb);
+
+	gettimeofday(&startTime,NULL);
+
+	if ( ( smaugPID = fork())==0) {
+		printf("Smaug is born\n");
+		smaug(winProb); 
+		printf("Smaug dies\n");
+		exit(0);
+	}
+       while( 1 ) {
+
+		sem_wait(S_PTERMINATE);
+       		if( *terminateFlagp != 0)  { 
+
+			sem_post(S_PTERMINATE);
+			break;
+		}
+
+		sem_post(S_PTERMINATE);
+		elapsedTime = timeChange(startTime);
+		
+		if( totalThiefInterval - elapsedTime < totalThiefInterval) {
+
+			nextInterval =(int)((double)rand() / RAND_MAX *  maxThiefIntervalUsec);
+			totalThiefInterval += nextInterval/1000.0;
+			sleepingTime = (int)( (double)rand()/ RAND_MAX *  maxThiefIntervalUsec);
+
+			if ( (thiefPID = fork())==0) {
+				elapsedTime = timeChange(startTime);
+				thief( sleepingTime );
+				thiefCreated++;
+				exit(0);
+			}
+			 else if( thiefPID > 0) {
+			 	thiefCreated++;
+			 }
+		}
+		
+	
+		if( totalHunterInterval - elapsedTime < totalHunterInterval) {
+
+			nextInterval =(int)((double)rand() / RAND_MAX *  maxHunterIntervalUsec);
+			totalHunterInterval += nextInterval/1000.0;
+			sleepingTime = (int)( (double)rand()/ RAND_MAX *  maxHunterIntervalUsec);
+
+			if ( (hunterPID = fork())==0) {
+				elapsedTime = timeChange(startTime);
+				hunter( sleepingTime );	
+				exit(0);
+			}
+			 else if( hunterPID > 0) {
+			 	hunterCreated++;
+		
+			 }
+		}
+		
+		while( (w = waitpid( -1, &status, WNOHANG)) > 1){
+		       	if (WIFEXITED(status)){
+			       	if (WEXITSTATUS(status) > 0) {
+					terminate();
+					exit(0);
+				}
+			}
+		}
+		if( *terminateFlagp == 1 )break;
+	}
+	if( *terminateFlagp == 1 ) {
+		terminate();
+	}
+	printf("Exit Main process %8d\n", getpid());
+	exit(0);
+}
+
+
+void initSem()
+{
+
+	semID=semget(IPC_PRIVATE, 40, 0666 | IPC_CREAT); 
+
+    S_THIEVESWAITING = sem_open(SEM_THIEVESWAITING, O_CREAT, 0600, 0);
+	S_THIEVESPLAYED = sem_open(SEM_THIEVESPLAYED, O_CREAT, 0600, 0);
+    S_THIEFPLAYING = sem_open(SEM_THIEFPLAYING, O_CREAT, 0600, 0);
+
+    S_HUNTERSWAITING = sem_open(SEM_HUNTERSWAITING, O_CREAT, 0600, 0);
+	S_HUNTERSFOUGHT = sem_open(SEM_HUNTERSFOUGHT, O_CREAT, 0600, 0);
+    S_HUNTERFIGHTING = sem_open(SEM_HUNTERFIGHTING, O_CREAT, 0600, 0);
+
+    S_GAMEDONE = sem_open(SEM_GAMEDONE, O_CREAT, 0600, 0);
+
+    S_DRAGONPLAYING = sem_open(SEM_DRAGONPLAYING, O_CREAT, 0600, 0);
+	S_DRAGONFIGHTING = sem_open(SEM_DRAGONFIGHTING, O_CREAT, 0600, 0);
+    S_DRAGONSLEEPING = sem_open(SEM_DRAGONSLEEPING, O_CREAT, 0600, 0);
+
+
+    S_PTHIEVESWAITING = sem_open(SEM_PTHIEVESWAITING, O_CREAT, 0600, 1);
+	S_PHUNTERSWAITING = sem_open(SEM_PHUNTERSWAITING, O_CREAT, 0600, 1);
+    S_PTERMINATE = sem_open(SEM_PTERMINATE, O_CREAT, 0600, 1);
+
+
+    terminateFlag = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
+	thievesWaitingCounter = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
+    huntersWaitingCounter = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | 0666);
+    terminateFlagp = shmat(terminateFlag, NULL, 0);
+	thievesWaitingCounterp= shmat(thievesWaitingCounter, NULL, 0);
+	huntersWaitingCounterp= shmat(huntersWaitingCounter, NULL, 0);
+}
+
+
+void smaug(float winProb)
+{
+	double elapsedTime;
+	int ThievesDefeatedTotal = 0;
+	int HuntersDefeatedTotal = 0;
+	float smuagWinRate = 0;
+	int jewels = 30;
+
+	printf("Smaug is goning to sleep\n" );
+
+	sem_wait(S_DRAGONSLEEPING);
+
+	printf("Smaug has woken up \n" );
+    printf("Smaug takes a deep breath \n" );
+
+	while (1) {		
+			if(*thievesWaitingCounterp >=1){
+				
+				*thievesWaitingCounterp = *thievesWaitingCounterp - 1;
+				
+				printf("Smaug smells a thief\n");
+
+				sem_post(S_THIEVESWAITING);
+				sem_post(S_PTHIEVESWAITING);
+
+
+				printf("Smaug is playing with a thief\n");
+
+				sem_wait(S_DRAGONPLAYING);
+
+				smuagWinRate = (float)rand() / RAND_MAX;
+
+				if (smuagWinRate>winProb){
+					printf("Smaug has defeated a Thief!\n");
+					ThievesDefeatedTotal = ThievesDefeatedTotal + 1;
+
+					if(ThievesDefeatedTotal >= MAX_THIEVES_DEFEATED) {
+						printf("Smaug has defeated 3 thieves\n");
+						*terminateFlagp= 1;
+						break; 
+					}	
+					printf("Smaug has  added to his treasure he now has %i jewels\n", jewels);
+					jewels +=20;
+					
+					if(jewels >= MAX_TREASURE_IN_HOARD) {
+						printf("Smaug has over 80 jewels. END\n");
+						*terminateFlagp= 1;
+						break; 
+					}	
+				}
+				else{
+					printf("Smaug has been defeated by a Thief!\n");
+					printf("Smaug has lost some treasure he now has %i jewels\n", jewels);
+					jewels -=8;
+					
+					if(jewels <= MIN_TREASURE_IN_HOARD) {
+						printf("Smaug has no more treasure\n");
+						*terminateFlagp= 1;
+						break; 
+					}	
+				}
+                printf("Smaug has finished a game\n");
+				sem_post(S_THIEVESPLAYED);
+				sem_wait(S_PTHIEVESWAITING);
+
+
+				
+			}
+				sem_post(S_PTHIEVESWAITING);
+
+
+				sem_wait(S_PHUNTERSWAITING);
+
+				if(*huntersWaitingCounterp >=1){
+
+				    printf("Smaug smells a treasure hunter\n");
+					*huntersWaitingCounterp = *huntersWaitingCounterp - 1;
+
+					sem_post(S_HUNTERSWAITING);
+					sem_post(S_PHUNTERSWAITING);
+
+
+					printf("Smaug is fighting with treasure hunter\n");
+					sem_wait(S_DRAGONFIGHTING);
+
+
+					smuagWinRate = (float)rand() / RAND_MAX;
+					if (smuagWinRate>winProb){
+							printf("Smaug has defeated a treasure hunter!\n");
+						HuntersDefeatedTotal = HuntersDefeatedTotal + 1;
+						if(HuntersDefeatedTotal >= MAX_HUNTERS_DEFEATED) {
+							printf("SSmaug has defeated 4 hunters\n");
+							*terminateFlagp= 1;
+							break; 
+						}	
+						printf("Smaug has  added to his treasure he now has %i jewels\n", jewels);
+						jewels +=5;
+						if(jewels >= MAX_TREASURE_IN_HOARD) {
+							printf("Smaug has over 80 jewels. END\n");
+							*terminateFlagp= 1;
+							break; 
+						}	
+					}
+
+					else{
+						printf("Smaug has been defeated by a treasuer huner!\n");
+					    printf("Smaug has lost some treasure he now has %i jewels\n", jewels);
+						jewels -=10;
+						if(jewels <= MIN_TREASURE_IN_HOARD) {
+							printf("Smaug has no more treasure\n");
+							*terminateFlagp= 1;
+							break; 
+						}	
+
+					}
+                    printf("Smaug has finished a battle\n");
+					sem_post(S_HUNTERSFOUGHT);
+					sem_wait(S_PHUNTERSWAITING);
+				}
+
+
+			sem_post(S_PHUNTERSWAITING);
+
+			printf("No visitors.\n");	
+			printf("Smaug sleeps again\n");
+			sem_wait(S_DRAGONSLEEPING);
+			printf("Smaug wakes again\n");
+	}
+}
+
+void thief(int startTimeN)
+{
+
+	int localpid;
+	localpid = getpid();
+
+	printf("Thief %d is wandering in the valley\n", localpid);
+
+	sem_wait(S_PTHIEVESWAITING);
+	*thievesWaitingCounterp = *thievesWaitingCounterp + 1;
+	sem_post(S_PTHIEVESWAITING);
+
+	sem_post(S_DRAGONSLEEPING); 
+
+	sem_wait(S_THIEVESWAITING);
+	printf("Thief %d is traveling to the valley\n", localpid);
+	sem_post(S_DRAGONPLAYING);
+
+	printf("Thief %d is playing with Smaug\n", localpid);
+
+	sem_wait(S_THIEVESPLAYED);
+	printf("Thief %d leaves\n", localpid);
+
+}
+
+
+void hunter(int startTimeN)
+{
+	int localpid;
+	localpid = getpid();
+	printf("Treasure hunter is %d is wandering in the valley\n", localpid);
+	sem_wait(S_PHUNTERSWAITING);
+	*huntersWaitingCounterp = *huntersWaitingCounterp + 1;
+	sem_post(S_PHUNTERSWAITING);
+	sem_post(S_DRAGONSLEEPING); 
+	sem_wait(S_HUNTERSWAITING);
+    printf("Treasure hunter is %d is traveling in the valley\n", localpid);
+	sem_post(S_DRAGONFIGHTING);
+
+	printf("Treasure hunter %d is fighting with Smaug\n", localpid);
+	sem_wait(S_HUNTERSFOUGHT);
+	printf("Treasure hunter %d leaves\n", localpid);
+}
+
+
+
+
+double timeChange( const struct timeval startTime )
+{
+	struct timeval nowTime;
+	double elapsedTime;
+
+	gettimeofday(&nowTime,NULL);
+	elapsedTime = (nowTime.tv_sec - startTime.tv_sec)*1000.0;
+	elapsedTime +=  (nowTime.tv_usec - startTime.tv_usec)/1000.0;
+	return elapsedTime;
+
+}
+void terminate() {
+	pid_t localpgid;
+	pid_t localpid;
+	int w = 0;
+	int status;
+
+	localpid = getpid();
+	printf("Terminate %8d\n", localpgid);
+
+
+	while( (w = waitpid( -1, &status, WNOHANG)) > 1){
+			printf("Process in terminate %d\n", w);
+	}
+
+	relSemMem();
+	printf("Final terminate\n");
+}
+
+void relSemMem() 
+{
+	pid_t localpid;
+	int w = 0;
+	int status;
+
+	localpid = getpid();
+
+	semctl(semID, 0, IPC_RMID, seminfo); 
+
+	usleep(1000);
+	while( (w = waitpid( -1, &status, WNOHANG)) > 1){
+			printf("Terminate %d\n", w);
+	}
+    shmdt(terminateFlagp);
+    shmctl(terminateFlag, IPC_RMID, NULL );
+    shmdt(thievesWaitingCounterp);
+	shmctl(thievesWaitingCounter, IPC_RMID, NULL );
+	shmdt(huntersWaitingCounterp);
+	shmctl(huntersWaitingCounter, IPC_RMID, NULL );
+
+
+
+
+}
